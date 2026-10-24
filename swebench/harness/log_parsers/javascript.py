@@ -696,10 +696,9 @@ def parse_log_vitest(log: str, test_spec: TestSpec) -> dict[str, str]:
 def parse_log_karma(log: str, test_spec: TestSpec) -> dict[str, str]:
     """
     Parser for test logs generated with Karma. Handles duplicate test names in
-    different describe blocks. Logic is brittle.
+    different describe blocks.
     """
     test_status_map = {}
-    current_indent = -1
     current_suite = []
     started = False
 
@@ -720,19 +719,20 @@ def parse_log_karma(log: str, test_spec: TestSpec) -> dict[str, str]:
         match = re.match(pattern, line)
         if match:
             indent, status, name = match.groups()
+            # Both suite headings and tests can return to an ancestor's level.
+            # Retain each suite's indentation so siblings replace one another
+            # without discarding their shared parent.
+            new_indent = len(line) - len(line.lstrip())
+            while current_suite and current_suite[-1][0] >= new_indent:
+                current_suite.pop()
 
-            if indent and not status:
-                new_indent = len(indent)
-                if new_indent > current_indent:
-                    current_indent = new_indent
-                    current_suite.append(name)
-                elif new_indent < current_indent:
-                    current_indent = new_indent
-                    current_suite.pop()
-                    continue
+            if indent and not status and name:
+                current_suite.append((new_indent, name))
 
             if status in ("✔", "✖"):
-                full_test_name = " > ".join(current_suite + [name])
+                full_test_name = " > ".join(
+                    [suite_name for _, suite_name in current_suite] + [name]
+                )
                 test_status_map[full_test_name] = (
                     TestStatus.PASSED.value
                     if status == "✔"
